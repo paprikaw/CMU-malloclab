@@ -44,6 +44,13 @@ static char *mem_max_addr; /* Max legal heap addr plus 1*/
 #define DSIZE 8             /* Double word size (bytes) */
 #define CHUNKSIZE (1 << 12) /* Extend heap by this amount (bytes) */
 
+/* single word (4) or double word (8) alignment */
+#define ALIGNMENT 8
+
+/* rounds up to the nearest multiple of ALIGNMENT */
+/* ~0x0007 = 0xfff8 */
+#define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
+
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 /* Pack a size and allocated bit into a word */
@@ -64,8 +71,15 @@ static char *mem_max_addr; /* Max legal heap addr plus 1*/
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
-
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+
+/* heap checking*/
+#define HEAP_CHECK(lineno) mm_checkheap(lineno)
+// #define HEAP_CHECK(lineno)
+
+/* helper function*/
+static void *extend_heap(size_t words);
+static void *coalesce(char *bp);
 /*
  * mm_init - initialize the malloc package.
  */
@@ -73,7 +87,7 @@ int mm_init(void)
 {
     mem_init();
     /*构建padding block， 头节点和尾节点*/
-    if ((mem_heap = mem_sbrk(4 * WSIZE)) == (-1))
+    if ((mem_heap = mem_sbrk(4 * WSIZE)) == (void *)(-1))
     {
         return -1;
     }
@@ -82,6 +96,12 @@ int mm_init(void)
     PUT(mem_heap + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(mem_heap + (3 * WSIZE), PACK(0, 1));
     mem_heap += (2 * WSIZE); // moved to the true start of the heap;
+    if ((extend_heap(CHUNKSIZE / WSIZE)) == NULL)
+    {
+        return -1;
+    }
+
+    HEAP_CHECK(__LINE__);
     return 0;
 }
 
@@ -128,6 +148,7 @@ void *mm_realloc(void *ptr, size_t size)
     mm_free(oldptr);
     return newptr;
 }
+
 /*
  * extend_heap - Extend heap with free block and return its block pointer
  */
@@ -147,5 +168,49 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */ // line:vm:mm:newepihdr
 
     /* Coalesce if the previous block was free */
-    return coalesce(bp); // line:vm:mm:returnblock
+    return coalesce(bp);
+}
+
+/*
+ * extend_heap - Extend heap with free block and return its block pointer
+ */
+static void *coalesce(char *bp)
+{
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    size_t size = GET_SIZE(HDRP(bp));
+
+    if (prev_alloc && next_alloc)
+    { /* Case 1 */
+        return bp;
+    }
+
+    else if (prev_alloc && !next_alloc)
+    { /* Case 2 */
+        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        PUT(HDRP(bp), PACK(size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+    }
+
+    else if (!prev_alloc && next_alloc)
+    { /* Case 3 */
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+
+    else
+    { /* Case 4 */
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
+                GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+}
+
+void mm_checkheap(int lineno)
+{
+    printf("line number: %d\n", lineno);
 }

@@ -1,6 +1,8 @@
 {
     "C_Cpp.default.configurationProvider": "ms-vscode.makefile-tools",
     "files.associations": {
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "memlib.h": "c",
+        "mm.h": "c"
     }
 }

@@ -18,27 +18,6 @@
 #include "mm.h"
 #include "memlib.h"
 
-/*********************************************************
- * NOTE TO STUDENTS: Before you do anything else, please
- * provide your team information in the following struct.
- ********************************************************/
-team_t team = {
-    /* Team name */
-    "ateam",
-    /* First member's full name */
-    "Harry Bovik",
-    /* First member's email address */
-    "bovik@cs.cmu.edu",
-    /* Second member's full name (leave blank if none) */
-    "",
-    /* Second member's email address (leave blank if none) */
-    ""};
-
-/* Private global variables */
-static char *mem_heap;     /* Points to first byte of heap */
-static char *mem_brk;      /* Points to last byte of heap plus 1 */
-static char *mem_max_addr; /* Max legal heap addr plus 1*/
-
 /* Basic constants and macros */
 #define WSIZE 4             /* Word and header/footer size (bytes) */
 #define DSIZE 8             /* Double word size (bytes) */
@@ -74,12 +53,35 @@ static char *mem_max_addr; /* Max legal heap addr plus 1*/
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 /* heap checking*/
-#define HEAP_CHECK(lineno) mm_checkheap(lineno)
+#define HEAP_CHECK(lineno) checkheap(lineno)
 // #define HEAP_CHECK(lineno)
+
+/*********************************************************
+ * NOTE TO STUDENTS: Before you do anything else, please
+ * provide your team information in the following struct.
+ ********************************************************/
+team_t team = {
+    /* Team name */
+    "ateam",
+    /* First member's full name */
+    "Harry Bovik",
+    /* First member's email address */
+    "bovik@cs.cmu.edu",
+    /* Second member's full name (leave blank if none) */
+    "",
+    /* Second member's email address (leave blank if none) */
+    ""};
+
+/* Private global variables */
+static char *mem_heap;     /* Points to first byte of heap */
+static char *mem_brk;      /* Points to last byte of heap plus 1 */
+static char *mem_max_addr; /* Max legal heap addr plus 1*/
 
 /* helper function*/
 static void *extend_heap(size_t words);
 static void *coalesce(char *bp);
+int is_coalesce();
+static void checkheap(int lineno);
 /*
  * mm_init - initialize the malloc package.
  */
@@ -161,12 +163,12 @@ static void *extend_heap(size_t words)
     size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE; // line:vm:mm:beginextend
     if ((long)(bp = mem_sbrk(size)) == -1)
         return NULL; // line:vm:mm:endextend
-
     /* Initialize free block header/footer and the epilogue header */
     PUT(HDRP(bp), PACK(size, 0)); /* Free block header */           // line:vm:mm:freeblockhdr
     PUT(FTRP(bp), PACK(size, 0)); /* Free block footer */           // line:vm:mm:freeblockftr
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */ // line:vm:mm:newepihdr
-
+    mem_brk = NEXT_BLKP(bp);
+    mem_max_addr = FTRP(bp) - 1;
     /* Coalesce if the previous block was free */
     return coalesce(bp);
 }
@@ -179,7 +181,6 @@ static void *coalesce(char *bp)
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
-
     if (prev_alloc && next_alloc)
     { /* Case 1 */
         return bp;
@@ -208,9 +209,69 @@ static void *coalesce(char *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+    return bp;
 }
 
-void mm_checkheap(int lineno)
+/*********************************************************
+ * Heap checker
+ ********************************************************/
+static void checkheap(int lineno)
+
 {
-    printf("line number: %d\n", lineno);
+    char *cur_pos = mem_heap;
+    int is_prev_empty = 0;
+    int is_coalesce = 1;
+    int is_head_tail_equal = 1;
+
+    // interate throught the whole heap list
+    while (cur_pos < mem_max_addr)
+    {
+        int is_alloc = GET_ALLOC(HDRP(cur_pos));
+        /*检查是否coalesce*/
+        if (is_prev_empty == 1 && (!is_alloc))
+        {
+
+            is_coalesce = 0;
+            break;
+        }
+        is_prev_empty = is_alloc ? 0 : 1;
+
+        /*检查头尾tag是否相同*/
+        for (int i = 0; i < WSIZE; i++)
+        {
+            if (*((char *)HDRP(cur_pos) + i) != *((char *)FTRP(cur_pos) + i))
+            {
+                is_head_tail_equal = 0;
+                break;
+            }
+        }
+        cur_pos = NEXT_BLKP(cur_pos);
+    }
+
+    if (!(is_coalesce && is_head_tail_equal))
+        printf("line %d: ", lineno);
+
+    /*检查是否coalesce*/
+    if (!is_coalesce)
+        printf("Free block is not coalescing in block %lx\n", (unsigned long int)cur_pos);
+
+    /*检查头尾tag是否相同*/
+    if (!is_head_tail_equal)
+        printf("head block is not the same with tail block \n");
 }
+
+#ifdef MAIN
+int main()
+{
+    if (mm_init() < 0)
+    {
+        printf("initialization is failed");
+        return 0;
+    }
+    // 检查coaleasce heap checker是否起作用
+    extend_heap(10);
+    extend_heap(10);
+    HEAP_CHECK(__LINE__);
+    return 0;
+}
+#endif

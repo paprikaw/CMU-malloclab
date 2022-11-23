@@ -92,7 +92,6 @@ static void checkheap(int lineno);
  */
 int mm_init(void)
 {
-    mem_init();
     /*构建padding block， 头节点和尾节点*/
     if ((mem_heap = mem_sbrk(4 * WSIZE)) == (void *)(-1))
     {
@@ -141,7 +140,7 @@ void *mm_malloc(size_t size)
     {
         if ((new_space = extend_heap(CHUNKSIZE / WSIZE)) == NULL)
         {
-            return -1;
+            return NULL;
         }
         new_space = coalesce(new_space);
         split_space(new_space, size);
@@ -166,45 +165,41 @@ void mm_free(void *ptr)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-#define OLD_IMPLEMENTATION
-#ifdef OLD_IMPLEMENATION
-    void *oldptr = ptr;
+    size_t oldsize;
     void *newptr;
-    size_t copySize;
 
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
-        return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-        copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
-    return newptr;
-#endif
-#ifndef OLD_IMPLEMENTATION
+    /* If size == 0 then this is just free, and we return NULL. */
+    if (size == 0)
+    {
+        mm_free(ptr);
+        return 0;
+    }
+
+    /* If oldptr is NULL, then this is just malloc. */
     if (ptr == NULL)
     {
         return mm_malloc(size);
     }
 
-    if (size == 0)
+    newptr = mm_malloc(size);
+
+    /* If realloc() fails the original block is left untouched  */
+    if (!newptr)
     {
-        if (ptr != NULL)
-            mm_free(ptr);
-        return NULL;
+        return 0;
     }
 
-    int is_next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(ptr)));
-    int is_prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(ptr)));
+    /* Copy the old data. */
 
-    /* case 1 */
-    if (is_next_alloc && is_prev_alloc)
-    {
-        char *new_ptr;
-        if ((new_ptr = mm_malloc(size)))
-    }
-#endif
+    oldsize = GET_SIZE(HDRP(ptr));
+    if (size < oldsize)
+        oldsize = size;
+    memcpy(newptr, ptr, oldsize);
+
+    /* Free the old block. */
+    mm_free(ptr);
+
+    return newptr;
 }
 
 /*
@@ -247,7 +242,7 @@ static void *coalesce(char *bp)
     { /* Case 2 */
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
     }
 
     else if (!prev_alloc && next_alloc)
@@ -362,8 +357,8 @@ static void split_space(char *cur_pos, size_t size)
     }
 
     allocate_block(cur_pos, size);
-    // split the block
-    if (cur_size > size)
+    // split the block if current block is bigger than 2 words
+    if (cur_size - size > DSIZE)
     {
         set_block(NEXT_BLKP(cur_pos), cur_size - size, 0);
     }

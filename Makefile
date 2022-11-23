@@ -24,8 +24,8 @@ mm_main.o: mm.c mm.h memlib.h
 	$(CC) $(CFLAGS) -c -o mm_main.o -DMAIN mm.c
 
 # mm without main
-mm.o: mm-cmu.c mm.h memlib.h
-	$(CC) $(CFLAGS) -c -o mm.o mm-cmu.c
+mm.o: mm.c mm.h memlib.h
+	$(CC) $(CFLAGS) -c  mm.c
 mm2.o: mm2.c mm.h memlib.h
 fsecs.o: fsecs.c fsecs.h config.h
 fcyc.o: fcyc.c fcyc.h

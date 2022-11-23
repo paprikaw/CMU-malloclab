@@ -122,23 +122,27 @@ void *mm_malloc(size_t size)
     size = ALIGN(size + 2 * WSIZE);
     char *cur_pos = mem_heap;
     char *new_space;
+    size_t cur_size = 0;
     // interate throught the whole heap list
-    while (cur_pos < mem_max_addr)
+    while (GET_SIZE(HDRP(cur_pos)) != 0)
     {
-        size_t cur_size = GET_SIZE(HDRP(cur_pos));
+        cur_size = GET_SIZE(HDRP(cur_pos));
         //找到合适的位置
         if (GET_ALLOC(HDRP(cur_pos)) == 0 &&
             (size <= cur_size))
         {
+            HEAP_CHECK(__LINE__);
             split_space(cur_pos, size);
             new_space = cur_pos;
             break;
         }
         cur_pos = NEXT_BLKP(cur_pos);
     }
+
     if (cur_pos >= mem_max_addr)
     {
-        if ((new_space = extend_heap(CHUNKSIZE / WSIZE)) == NULL)
+        size = size < CHUNKSIZE ? CHUNKSIZE : size;
+        if ((new_space = extend_heap(size / WSIZE)) == NULL)
         {
             return NULL;
         }
@@ -277,8 +281,9 @@ static void checkheap(int lineno)
     int is_head_tail_equal = 1;
     int is_cloased_boundary = 1;
     size_t total_space = 0;
+    size_t size = 0;
     // interate throught the whole heap list
-    while (cur_pos < mem_max_addr)
+    while (GET_SIZE(HDRP(cur_pos)) != 0)
     {
         int is_alloc = GET_ALLOC(HDRP(cur_pos));
         /*检查是否coalesce*/
@@ -289,6 +294,11 @@ static void checkheap(int lineno)
         }
         is_prev_empty = is_alloc ? 0 : 1;
 
+        size = GET_SIZE(HDRP(cur_pos));
+        if (size > mem_max_space)
+        {
+            printf("%d: size is wrong!\n", lineno);
+        }
         /*检查头尾tag是否相同*/
         for (int i = 0; i < WSIZE; i++)
         {
@@ -345,22 +355,23 @@ static void free_block(char *pos)
     set_block(pos, GET_SIZE(HDRP(pos)), 0);
 }
 
-static void split_space(char *cur_pos, size_t size)
+static void split_space(char *bp, size_t asize)
 {
     HEAP_CHECK(__LINE__);
-    size_t cur_size = GET_SIZE(HDRP(cur_pos));
-    // 如果空间不够;
-    if (cur_size < size)
-    {
-        printf("line %d space is not enough\n", __LINE__);
-        return;
-    }
+    size_t csize = GET_SIZE(HDRP(bp));
 
-    allocate_block(cur_pos, size);
-    // split the block if current block is bigger than 2 words
-    if (cur_size - size > DSIZE)
+    if ((csize - asize) >= (2 * DSIZE))
     {
-        set_block(NEXT_BLKP(cur_pos), cur_size - size, 0);
+        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(FTRP(bp), PACK(asize, 1));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize - asize, 0));
+        PUT(FTRP(bp), PACK(csize - asize, 0));
+    }
+    else
+    {
+        PUT(HDRP(bp), PACK(csize, 1));
+        PUT(FTRP(bp), PACK(csize, 1));
     }
     HEAP_CHECK(__LINE__);
 }

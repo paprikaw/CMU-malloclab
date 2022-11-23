@@ -53,8 +53,8 @@
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 /* heap checking*/
-#define HEAP_CHECK(lineno) checkheap(lineno)
-// #define HEAP_CHECK(lineno)
+// #define HEAP_CHECK(lineno) checkheap(lineno)
+#define HEAP_CHECK(lineno)
 
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
@@ -73,14 +73,19 @@ team_t team = {
     ""};
 
 /* Private global variables */
-static char *mem_heap;     /* Points to first byte of heap */
-static char *mem_brk;      /* Points to last byte of heap plus 1 */
-static char *mem_max_addr; /* Max legal heap addr plus 1*/
+static char *mem_heap;           /* Points to first byte of heap */
+static char *mem_brk;            /* Points to last byte of heap plus 1 */
+static char *mem_max_addr;       /* Max legal heap addr plus 1*/
+static size_t mem_max_space = 0; /* Max space for heap*/
 
 /* helper function*/
 static void *extend_heap(size_t words);
 static void *coalesce(char *bp);
 int is_coalesce();
+static void set_block(char *pos, size_t size, int is_allocate);
+static void allocate_block(char *pos, size_t size);
+static void free_block(char *pos);
+static void split_space(char *cur_pos, size_t size);
 static void checkheap(int lineno);
 /*
  * mm_init - initialize the malloc package.
@@ -98,6 +103,7 @@ int mm_init(void)
     PUT(mem_heap + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(mem_heap + (3 * WSIZE), PACK(0, 1));
     mem_heap += (2 * WSIZE); // moved to the true start of the heap;
+    mem_max_space = 2 * WSIZE;
     if ((extend_heap(CHUNKSIZE / WSIZE)) == NULL)
     {
         return -1;
@@ -113,15 +119,35 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    int newsize = ALIGN(size + SIZE_T_SIZE);
-    void *p = mem_sbrk(newsize);
-    if (p == (void *)-1)
-        return NULL;
-    else
+    HEAP_CHECK(__LINE__);
+    size = ALIGN(size + 2 * WSIZE);
+    char *cur_pos = mem_heap;
+    char *new_space;
+    // interate throught the whole heap list
+    while (cur_pos < mem_max_addr)
     {
-        *(size_t *)p = size;
-        return (void *)((char *)p + SIZE_T_SIZE);
+        size_t cur_size = GET_SIZE(HDRP(cur_pos));
+        //找到合适的位置
+        if (GET_ALLOC(HDRP(cur_pos)) == 0 &&
+            (size <= cur_size))
+        {
+            split_space(cur_pos, size);
+            new_space = cur_pos;
+            break;
+        }
+        cur_pos = NEXT_BLKP(cur_pos);
     }
+    if (cur_pos >= mem_max_addr)
+    {
+        if ((new_space = extend_heap(CHUNKSIZE / WSIZE)) == NULL)
+        {
+            return -1;
+        }
+        new_space = coalesce(new_space);
+        split_space(new_space, size);
+        HEAP_CHECK(__LINE__);
+    }
+    return new_space;
 }
 
 /*
@@ -129,6 +155,10 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
+    HEAP_CHECK(__LINE__);
+    set_block(ptr, GET_SIZE(HDRP(ptr)), 0);
+    coalesce(ptr);
+    HEAP_CHECK(__LINE__);
 }
 
 /*
@@ -136,6 +166,8 @@ void mm_free(void *ptr)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+#define OLD_IMPLEMENTATION
+#ifdef OLD_IMPLEMENATION
     void *oldptr = ptr;
     void *newptr;
     size_t copySize;
@@ -149,6 +181,30 @@ void *mm_realloc(void *ptr, size_t size)
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
+#endif
+#ifndef OLD_IMPLEMENTATION
+    if (ptr == NULL)
+    {
+        return mm_malloc(size);
+    }
+
+    if (size == 0)
+    {
+        if (ptr != NULL)
+            mm_free(ptr);
+        return NULL;
+    }
+
+    int is_next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(ptr)));
+    int is_prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(ptr)));
+
+    /* case 1 */
+    if (is_next_alloc && is_prev_alloc)
+    {
+        char *new_ptr;
+        if ((new_ptr = mm_malloc(size)))
+    }
+#endif
 }
 
 /*
@@ -156,9 +212,9 @@ void *mm_realloc(void *ptr, size_t size)
  */
 static void *extend_heap(size_t words)
 {
+    HEAP_CHECK(__LINE__);
     char *bp;
     size_t size;
-
     /* Allocate an even number of words to maintain alignment */
     size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE; // line:vm:mm:beginextend
     if ((long)(bp = mem_sbrk(size)) == -1)
@@ -169,6 +225,7 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */ // line:vm:mm:newepihdr
     mem_brk = NEXT_BLKP(bp);
     mem_max_addr = FTRP(bp) - 1;
+    mem_max_space += size;
     /* Coalesce if the previous block was free */
     return coalesce(bp);
 }
@@ -209,6 +266,7 @@ static void *coalesce(char *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+    HEAP_CHECK(__LINE__);
     return bp;
 }
 
@@ -222,7 +280,8 @@ static void checkheap(int lineno)
     int is_prev_empty = 0;
     int is_coalesce = 1;
     int is_head_tail_equal = 1;
-
+    int is_cloased_boundary = 1;
+    size_t total_space = 0;
     // interate throught the whole heap list
     while (cur_pos < mem_max_addr)
     {
@@ -232,7 +291,6 @@ static void checkheap(int lineno)
         {
 
             is_coalesce = 0;
-            break;
         }
         is_prev_empty = is_alloc ? 0 : 1;
 
@@ -245,10 +303,18 @@ static void checkheap(int lineno)
                 break;
             }
         }
+        /*检查一个block之前是否有一个boundary tag*/
+        if ((cur_pos != mem_heap) && NEXT_BLKP(PREV_BLKP(cur_pos)) != cur_pos)
+        {
+
+            is_cloased_boundary = 0;
+        }
+        /*记录总共在标签里面的size的总和*/
+        total_space += GET_SIZE(HDRP(cur_pos));
         cur_pos = NEXT_BLKP(cur_pos);
     }
 
-    if (!(is_coalesce && is_head_tail_equal))
+    if (!(is_coalesce && is_head_tail_equal && is_cloased_boundary && (total_space == mem_max_space)))
         printf("line %d: ", lineno);
 
     /*检查是否coalesce*/
@@ -258,6 +324,50 @@ static void checkheap(int lineno)
     /*检查头尾tag是否相同*/
     if (!is_head_tail_equal)
         printf("head block is not the same with tail block \n");
+
+    /*检查头尾tag是否相同*/
+    if (!is_cloased_boundary)
+        printf("boundary is not closed\n");
+    if (total_space != mem_max_space)
+        printf("space size error\n");
+}
+
+static void set_block(char *pos, size_t size, int is_allocate)
+{
+    // head
+    PUT(HDRP(pos), PACK(size, is_allocate));
+    // tail
+    PUT(FTRP(pos), PACK(size, is_allocate));
+}
+
+static void allocate_block(char *pos, size_t size)
+{
+    set_block(pos, size, 1);
+}
+
+static void free_block(char *pos)
+{
+    set_block(pos, GET_SIZE(HDRP(pos)), 0);
+}
+
+static void split_space(char *cur_pos, size_t size)
+{
+    HEAP_CHECK(__LINE__);
+    size_t cur_size = GET_SIZE(HDRP(cur_pos));
+    // 如果空间不够;
+    if (cur_size < size)
+    {
+        printf("line %d space is not enough\n", __LINE__);
+        return;
+    }
+
+    allocate_block(cur_pos, size);
+    // split the block
+    if (cur_size > size)
+    {
+        set_block(NEXT_BLKP(cur_pos), cur_size - size, 0);
+    }
+    HEAP_CHECK(__LINE__);
 }
 
 #ifdef MAIN
@@ -270,7 +380,9 @@ int main()
     }
     // 检查coaleasce heap checker是否起作用
     extend_heap(10);
+    HEAP_CHECK(__LINE__);
     extend_heap(10);
+    mm_malloc(8);
     HEAP_CHECK(__LINE__);
     return 0;
 }

@@ -141,8 +141,9 @@ void *mm_malloc(size_t size)
 
     if (cur_pos >= mem_max_addr)
     {
-        size = size < CHUNKSIZE ? CHUNKSIZE : size;
-        if ((new_space = extend_heap(size / WSIZE)) == NULL)
+
+        size_t allocate_size = size < CHUNKSIZE ? CHUNKSIZE : size;
+        if ((new_space = extend_heap(allocate_size / WSIZE)) == NULL)
         {
             return NULL;
         }
@@ -217,7 +218,10 @@ static void *extend_heap(size_t words)
     /* Allocate an even number of words to maintain alignment */
     size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE; // line:vm:mm:beginextend
     if ((long)(bp = mem_sbrk(size)) == -1)
+    {
+
         return NULL; // line:vm:mm:endextend
+    }
     /* Initialize free block header/footer and the epilogue header */
     PUT(HDRP(bp), PACK(size, 0)); /* Free block header */           // line:vm:mm:freeblockhdr
     PUT(FTRP(bp), PACK(size, 0)); /* Free block footer */           // line:vm:mm:freeblockftr
@@ -282,6 +286,10 @@ static void checkheap(int lineno)
     int is_cloased_boundary = 1;
     size_t total_space = 0;
     size_t size = 0;
+
+    if ((GET_SIZE(HDRP(mem_heap)) != DSIZE) || !GET_ALLOC(HDRP(mem_heap)))
+        printf("Bad prologue header\n");
+
     // interate throught the whole heap list
     while (GET_SIZE(HDRP(cur_pos)) != 0)
     {
@@ -294,11 +302,6 @@ static void checkheap(int lineno)
         }
         is_prev_empty = is_alloc ? 0 : 1;
 
-        size = GET_SIZE(HDRP(cur_pos));
-        if (size > mem_max_space)
-        {
-            printf("%d: size is wrong!\n", lineno);
-        }
         /*检查头尾tag是否相同*/
         for (int i = 0; i < WSIZE; i++)
         {
@@ -314,10 +317,18 @@ static void checkheap(int lineno)
 
             is_cloased_boundary = 0;
         }
+
+        /*检查alignment*/
+        if ((size_t)cur_pos % 8)
+            printf("Error: %p is not doubleword aligned\n", cur_pos);
+
         /*记录总共在标签里面的size的总和*/
         total_space += GET_SIZE(HDRP(cur_pos));
         cur_pos = NEXT_BLKP(cur_pos);
     }
+
+    if ((GET_SIZE(HDRP(cur_pos)) != 0) || !(GET_ALLOC(HDRP(cur_pos))))
+        printf("Bad epilogue header\n");
 
     if (!(is_coalesce && is_head_tail_equal && is_cloased_boundary && (total_space == mem_max_space)))
         printf("line %d: ", lineno);

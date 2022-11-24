@@ -284,11 +284,14 @@ static void checkheap(int lineno)
     int is_coalesce = 1;
     int is_head_tail_equal = 1;
     int is_cloased_boundary = 1;
+    int is_good_prologue = 1;
+    int is_good_epilogue = 1;
     size_t total_space = 0;
     size_t size = 0;
 
+    /* 检查prologue tag*/
     if ((GET_SIZE(HDRP(mem_heap)) != DSIZE) || !GET_ALLOC(HDRP(mem_heap)))
-        printf("Bad prologue header\n");
+        is_good_prologue = 0;
 
     // interate throught the whole heap list
     while (GET_SIZE(HDRP(cur_pos)) != 0)
@@ -311,26 +314,32 @@ static void checkheap(int lineno)
                 break;
             }
         }
-        /*检查一个block之前是否有一个boundary tag*/
+        /*检查一个block之前是否有一个boundary tag */
         if ((cur_pos != mem_heap) && NEXT_BLKP(PREV_BLKP(cur_pos)) != cur_pos)
         {
 
             is_cloased_boundary = 0;
         }
 
-        /*检查alignment*/
+        /*检查alignment */
         if ((size_t)cur_pos % 8)
             printf("Error: %p is not doubleword aligned\n", cur_pos);
 
-        /*记录总共在标签里面的size的总和*/
+        /*记录总共在标签里面的size的总和 */
         total_space += GET_SIZE(HDRP(cur_pos));
         cur_pos = NEXT_BLKP(cur_pos);
     }
 
+    /* 检查epilogue tag */
     if ((GET_SIZE(HDRP(cur_pos)) != 0) || !(GET_ALLOC(HDRP(cur_pos))))
-        printf("Bad epilogue header\n");
+        is_good_epilogue = 0;
 
-    if (!(is_coalesce && is_head_tail_equal && is_cloased_boundary && (total_space == mem_max_space)))
+    if (!(is_coalesce &&
+          is_head_tail_equal &&
+          is_cloased_boundary &&
+          (total_space == mem_max_space) &&
+          is_good_epilogue &&
+          is_good_prologue))
         printf("line %d: ", lineno);
 
     /*检查是否coalesce*/
@@ -341,11 +350,20 @@ static void checkheap(int lineno)
     if (!is_head_tail_equal)
         printf("head block is not the same with tail block \n");
 
-    /*检查头尾tag是否相同*/
+    /*检查blocz之前的boundary tag是否是valid的*/
     if (!is_cloased_boundary)
         printf("boundary is not closed\n");
+
+    /* 检查memory space是否都可以被retreive到*/
     if (total_space != mem_max_space)
         printf("space size error\n");
+
+    /* 检查epilogue tag和prologue tag*/
+    if (!is_good_epilogue)
+        printf("Bad epilogue header\n");
+
+    if (!is_good_prologue)
+        printf("Bad prologue header\n");
 }
 
 static void set_block(char *pos, size_t size, int is_allocate)
